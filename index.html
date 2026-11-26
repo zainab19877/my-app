@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>منظم الهدايا والمناسبات</title>
+  <meta name="description" content="نظّم مناسبات العائلة والأصدقاء، واختر الهدية المناسبة، وتحكّم بميزانيتك.">
+  <meta name="theme-color" content="#C2727F">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="هداياي">
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icon-192.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-icon" aria-hidden="true">🎁</span>
+      <div>
+        <h1>منظم الهدايا والمناسبات</h1>
+        <p class="brand-sub" id="todayLabel"></p>
+      </div>
+    </div>
+    <button class="icon-btn" data-action="openSettings" aria-label="الإعدادات">⚙️</button>
+  </header>
+
+  <main id="app">
+    <section class="view" id="view-home" aria-label="الرئيسية"></section>
+    <section class="view" id="view-people" aria-label="الأشخاص" hidden></section>
+    <section class="view" id="view-suggest" aria-label="اقتراح هدية" hidden></section>
+    <section class="view" id="view-budget" aria-label="الميزانية" hidden></section>
+  </main>
+
+  <nav class="tabbar" aria-label="التنقل">
+    <button class="tab active" data-tab="home"><span class="tab-ico">🏠</span><span>الرئيسية</span></button>
+    <button class="tab" data-tab="people"><span class="tab-ico">👨‍👩‍👧</span><span>الأشخاص</span></button>
+    <button class="tab" data-tab="suggest"><span class="tab-ico">🎁</span><span>اقترح هدية</span></button>
+    <button class="tab" data-tab="budget"><span class="tab-ico">💰</span><span>الميزانية</span></button>
+  </nav>
+
+  <div class="sheet-backdrop" id="sheetBackdrop" hidden>
+    <div class="sheet" role="dialog" aria-modal="true" id="sheet">
+      <div class="sheet-handle" aria-hidden="true"></div>
+      <div id="sheetBody"></div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
+  <script src="gifts.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
