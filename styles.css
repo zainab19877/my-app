@@ -337,3 +337,15 @@ textarea.input { min-height: 80px; resize: vertical; }
 .settings-list { display: flex; flex-direction: column; gap: 10px; }
 .settings-list .btn { justify-content: flex-start; }
 .hint { font-size: 13px; color: var(--muted); }
+
+/* ===== سجل الهدايا السابقة ===== */
+.history-card { display: flex; flex-direction: column; gap: 12px; }
+.history-people { display: flex; flex-direction: column; gap: 8px; }
+.history-person {
+  display: flex; align-items: center; gap: 10px; width: 100%; text-align: start;
+  background: var(--surface-2); border: 0; border-radius: 14px; padding: 10px 12px; cursor: pointer;
+}
+.history-person .ev-title, .history-person .ev-meta { display: block; }
+.history-person .ev-meta { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.avatar.sm { width: 40px; height: 40px; font-size: 20px; }
+.alert-ok.small { font-size: 14px; font-weight: 500; line-height: 1.7; }

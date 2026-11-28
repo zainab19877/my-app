@@ -29,15 +29,19 @@
       const raw = localStorage.getItem(STORE_KEY);
       if (raw) {
         const d = JSON.parse(raw);
-        return { people: d.people || [], events: d.events || [], notified: d.notified || {} };
+        return { people: d.people || [], events: d.events || [], history: d.history || [], notified: d.notified || {} };
       }
     } catch (e) { /* التخزين غير متاح */ }
-    return { people: [], events: [], notified: {} };
+    return { people: [], events: [], history: [], notified: {} };
   }
   function save() {
     try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); } catch (e) { /* تجاهل */ }
   }
   let state = load();
+  // ترحيل: إعطاء الهدايا القديمة تاريخ الدورة الحالية
+  (function migrate() {
+    state.events.forEach(ev => (ev.gifts || []).forEach(g => { if (!g.date) g.date = isoDate(nextDate(ev)); }));
+  })();
 
   // ================= أدوات مساعدة =================
   const $ = (s, el = document) => el.querySelector(s);
@@ -46,6 +50,14 @@
   const num = v => { const n = parseFloat(String(v).replace(',', '.')); return isFinite(n) && n >= 0 ? Math.round(n * 1000) / 1000 : 0; };
   const money = n => Number(n || 0).toLocaleString('en-US', { maximumFractionDigits: 2 }) + ' د.أ';
   const LOCALE = 'ar-JO-u-nu-latn';
+  // صيغة العدد الصحيحة: هدية واحدة، هديتان، 3 هدايا، 11 هدية
+  function giftCount(n) {
+    if (n === 0) return 'لا هدايا';
+    if (n === 1) return 'هدية واحدة';
+    if (n === 2) return 'هديتان';
+    if (n <= 10) return n + ' هدايا';
+    return n + ' هدية';
+  }
 
   function today() { const d = new Date(); d.setHours(0, 0, 0, 0); return d; }
   function parseDate(s) { const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d); }
@@ -79,7 +91,9 @@
 
   const person = id => state.people.find(p => p.id === id);
   const eventById = id => state.events.find(e => e.id === id);
-  const spent = ev => (ev.gifts || []).reduce((s, g) => s + num(g.cost), 0);
+  // هدايا الدورة الحالية فقط (للمناسبات السنوية تنتقل هدايا السنوات الماضية إلى السجل)
+  const currentGifts = ev => (ev.gifts || []).filter(g => !ev.recurring || !g.date || g.date >= isoDate(today()));
+  const spent = ev => currentGifts(ev).reduce((s, g) => s + num(g.cost), 0);
   function evName(ev) {
     const t = TYPES[ev.type] || TYPES.other;
     const p = person(ev.personId);
@@ -225,6 +239,8 @@
       if (up.length) html += up.map(x => eventCard(x.ev, x.days)).join('');
       else html += '<div class="card empty"><div class="e-ico">📅</div><p class="muted">لا توجد مناسبات قادمة. أضيفي مناسبة جديدة!</p></div>';
 
+      html += historySection();
+
       const past = pastEvents();
       if (past.length) {
         html += '<div class="section-title">مناسبات سابقة <small>' + past.length + '</small></div>';
@@ -284,11 +300,14 @@
     el.innerHTML = html;
   }
 
-  function scoreGifts(relation, type, budget) {
+  function scoreGifts(relation, type, budget, given) {
     const occ = (TYPES[type] || TYPES.other).code;
     const specificRel = relation && relation !== 'oth';
     const list = [];
+    const excluded = [];
     for (const g of window.GIFTS) {
+      const prev = (given || []).find(h => sameGift(g, h));
+      if (prev) { excluded.push({ gift: g, prev }); continue; }
       let occScore;
       if (occ !== 'o' && g.occ.includes(occ)) occScore = 3;
       else if (g.occ.includes('o')) occScore = 1;
@@ -302,7 +321,7 @@
     const within = list.filter(g => g.price <= budget)
       .sort((a, b) => b.score - a.score || b.price - a.price);
     const over = list.filter(g => g.price > budget).sort((a, b) => a.price - b.price);
-    return { within, over };
+    return { within, over, excluded };
   }
 
   function resultsHtml() {
@@ -324,7 +343,15 @@
       pageItems = items.concat(r.over.slice(0, PER_PAGE - total));
       note = '<div class="alert-over"><span class="a-ico">💡</span><span>الميزانية ' + money(r.budget) + ' منخفضة قليلاً لهذه المناسبة؛ أضفنا أقرب الخيارات بسعر أعلى بقليل.</span></div>';
     }
-    let html = '<div class="section-title">اقتراحات ' + esc(TYPES[r.type].label) + (relName ? ' لـ' + esc(relName) : '') + ' <small>' + total + ' هدية ضمن الميزانية</small></div>';
+    let html = '<div class="section-title">اقتراحات ' + esc(TYPES[r.type].label) + (relName ? ' لـ' + esc(relName) : '') + ' <small>' + giftCount(total) + ' ضمن الميزانية</small></div>';
+    const exPerson = person(r.personId);
+    if (exPerson) {
+      const prevNames = [...new Set(giftHistory(exPerson.id).map(h => h.name))];
+      if (prevNames.length) {
+        html += '<div class="alert-ok small">📜 استبعدنا الهدايا التي قُدّمت لـ' + esc(exPerson.name) + ' سابقاً: ' + prevNames.slice(0, 5).map(esc).join('، ') + (prevNames.length > 5 ? ' و' + (prevNames.length - 5) + ' غيرها' : '') +
+          ' <button class="btn btn-ghost btn-sm" data-action="openHistory" data-id="' + exPerson.id + '">عرض السجل</button></div>';
+      }
+    }
     html += note + '<div class="gift-grid">';
     html += pageItems.map((g, i) => {
       const overBy = g.price - r.budget;
@@ -380,11 +407,121 @@
       const isOver = b > 0 && s > b;
       return '<div class="card clickable" data-action="openEvent" data-id="' + ev.id + '">' +
         '<div class="event-card"><div class="ev-ico ' + ev.type + '">' + t.icon + '</div><div class="ev-body">' +
-        '<div class="ev-title">' + esc(evName(ev)) + '</div><div class="ev-meta">' + (ev.gifts || []).length + ' هدية · ' + daysText(days) + '</div></div>' +
+        '<div class="ev-title">' + esc(evName(ev)) + '</div><div class="ev-meta">' + giftCount(currentGifts(ev).length) + ' · ' + daysText(days) + '</div></div>' +
         '<span class="chip ' + (isOver ? 'over' : (b > 0 ? 'ok' : '')) + '">' + (isOver ? 'تجاوز ' + money(s - b) : (b > 0 ? 'متبقي ' + money(b - s) : 'بدون ميزانية')) + '</span></div>' +
         '<div class="mini-budget"><div class="row"><span>' + money(s) + '</span><span>' + money(b) + '</span></div>' + progressBar(s, b) + '</div></div>';
     }).join('');
     el.innerHTML = html;
+  }
+
+  // ================= سجل الهدايا السابقة =================
+  // يجمع الهدايا المسجلة على المناسبات + الهدايا المسجلة يدوياً
+  function giftHistory(personId) {
+    const list = [];
+    state.events.forEach(ev => {
+      if (personId && ev.personId !== personId) return;
+      (ev.gifts || []).forEach(g => list.push({
+        key: 'e' + g.id, source: 'event', evId: ev.id, personId: ev.personId, name: g.name,
+        type: ev.type, date: g.date || ev.date, cost: g.cost, catalogId: g.catalogId || ''
+      }));
+    });
+    (state.history || []).forEach(h => {
+      if (personId && h.personId !== personId) return;
+      list.push(Object.assign({ key: 'm' + h.id, source: 'manual' }, h));
+    });
+    return list.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+  }
+
+  // تطبيع الأسماء العربية للمقارنة (بدون رموز، همزات، "ال")
+  function tokens(name) {
+    return String(name || '')
+      .replace(/[ً-ْـ]/g, '')
+      .replace(/[أإآ]/g, 'ا').replace(/ة/g, 'ه').replace(/ى/g, 'ي')
+      .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+      .split(/\s+/)
+      .map(w => w.replace(/^(وال|بال|لل|ال)/, ''))
+      .filter(w => w.length >= 2 && !['مع', 'من', 'او', 'في', 'علي'].includes(w));
+  }
+  function sameGift(catalogGift, entry) {
+    if (entry.catalogId && entry.catalogId === catalogGift.id) return true;
+    const a = tokens(catalogGift.name), b = tokens(entry.name);
+    if (!a.length || !b.length) return false;
+    return b.every(w => a.includes(w)) || a.every(w => b.includes(w));
+  }
+
+  function historySection() {
+    const all = giftHistory();
+    let html = '<div class="section-title">📜 سجل الهدايا السابقة <small>' + giftCount(all.length) + '</small></div>';
+    html += '<div class="card history-card">';
+    if (!all.length) {
+      html += '<p class="muted small">سجّلي الهدايا التي قدّمتِها لكل شخص، وسنستبعدها من الاقتراحات حتى لا تتكرر.</p>';
+    } else {
+      const byPerson = state.people.map(p => ({ p, items: all.filter(h => h.personId === p.id) })).filter(x => x.items.length);
+      html += '<div class="history-people">' + byPerson.map(({ p, items }) => {
+        const r = REL[p.relation] || REL.oth;
+        const last = items[0];
+        return '<button class="history-person" data-action="openHistory" data-id="' + p.id + '">' +
+          '<span class="avatar sm">' + r.icon + '</span>' +
+          '<span class="ev-body"><span class="ev-title">' + esc(p.name) + ' <span class="muted small">(' + esc(r.label) + ')</span></span>' +
+          '<span class="ev-meta">' + giftCount(items.length) + ' · آخرها: ' + esc(last.name) + (last.date ? ' (' + parseDate(last.date).getFullYear() + ')' : '') + '</span></span>' +
+          '<span class="chip">›</span></button>';
+      }).join('') + '</div>';
+    }
+    html += '<button class="btn btn-soft btn-block" data-action="newHistory">➕ تسجيل هدية سابقة</button></div>';
+    return html;
+  }
+
+  function historySheet(personId) {
+    const p = person(personId); if (!p) return;
+    const items = giftHistory(personId);
+    const todayIso = isoDate(today());
+    let html = sheetHead('📜 هدايا ' + esc(p.name)) + '<div class="sheet-body">';
+    html += '<p class="hint">هذه الهدايا لن تظهر مرة أخرى في اقتراحات ' + esc(p.name) + '.</p>';
+    html += '<div class="gift-list">' + (items.length ? items.map(h => {
+      const t = TYPES[h.type] || TYPES.other;
+      const planned = h.date && h.date > todayIso;
+      return '<div class="gift-row"><span>' + t.icon + '</span><span class="g-name">' + esc(h.name) +
+        '<span class="ev-meta" style="display:block">' + esc(t.label) + (h.date ? ' · ' + fmtDate(parseDate(h.date)) : '') + (num(h.cost) ? ' · ' + money(h.cost) : '') + '</span></span>' +
+        (planned ? '<span class="chip soon">مخطط لها</span>' : '') +
+        (h.source === 'manual'
+          ? '<button class="del-btn" data-action="deleteHistory" data-id="' + h.id + '" data-person="' + p.id + '" aria-label="حذف">🗑️</button>'
+          : '<button class="del-btn" data-action="openEvent" data-id="' + h.evId + '" aria-label="فتح المناسبة" title="من مناسبة مسجلة">📅</button>') +
+        '</div>';
+    }).join('') : '<p class="muted small">لا توجد هدايا مسجلة لهذا الشخص بعد.</p>') + '</div>';
+    html += '<div class="btn-row"><button class="btn btn-primary" data-action="newHistoryFor" data-id="' + p.id + '">➕ تسجيل هدية سابقة</button>' +
+      '<button class="btn btn-soft" data-action="suggestForPerson" data-id="' + p.id + '">🎁 اقترح هدية جديدة</button></div>';
+    html += '</div>';
+    openSheet(html);
+  }
+
+  let historyDraft = null;
+  function historyForm(personId) {
+    if (!state.people.length) { afterPersonSave = null; personForm(null); toast('أضيفي الشخص أولاً'); return; }
+    historyDraft = { personId: personId || state.people[0].id, type: 'birthday' };
+    openSheet(sheetHead('تسجيل هدية سابقة') +
+      '<div class="form">' +
+      '<div class="field"><label for="hPerson">لمن قدّمتِ الهدية؟</label><select class="input" id="hPerson">' +
+      state.people.map(p => '<option value="' + p.id + '"' + (p.id === historyDraft.personId ? ' selected' : '') + '>' + esc(p.name) + ' (' + esc(relLabel(p)) + ')</option>').join('') +
+      '</select></div>' +
+      '<div class="field"><label for="hName">الهدية</label><input class="input" id="hName" list="giftNames" placeholder="مثال: عطر، ساعة يد، سوار ذهب" autocomplete="off">' +
+      '<datalist id="giftNames">' + window.GIFTS.map(g => '<option value="' + esc(g.name) + '">').join('') + '</datalist></div>' +
+      '<div class="field"><span class="label">المناسبة</span><div class="choice-grid">' +
+      Object.entries(TYPES).map(([k, t]) => '<button type="button" class="choice" data-action="pickHistType" data-id="' + k + '" aria-pressed="' + (k === 'birthday') + '"><span class="c-ico">' + t.icon + '</span>' + t.label + '</button>').join('') +
+      '</div></div>' +
+      '<div class="field"><label for="hDate">التاريخ التقريبي</label><input class="input" id="hDate" type="date" value="' + isoDate(today()) + '"></div>' +
+      '<div class="field"><label for="hCost">التكلفة (اختياري)</label><div class="input-money"><input class="input" id="hCost" type="number" inputmode="decimal" min="0" step="0.5" placeholder="مثال: 25"><span class="cur">د.أ</span></div></div>' +
+      '<div class="btn-row"><button class="btn btn-primary" data-action="saveHistory">💾 حفظ في السجل</button>' +
+      '<button class="btn btn-soft" data-action="saveHistoryAnother">💾 حفظ وإضافة أخرى</button></div>' +
+      '</div>');
+  }
+  function saveHistoryFromForm() {
+    const name = $('#hName').value.trim();
+    if (!name) { toast('اكتبي اسم الهدية', 'danger'); $('#hName').focus(); return null; }
+    const h = { id: uid(), personId: $('#hPerson').value, name, type: historyDraft.type, date: $('#hDate').value || isoDate(today()), cost: num($('#hCost').value) };
+    state.history = state.history || [];
+    state.history.push(h);
+    save();
+    return h;
   }
 
   // ================= نماذج الأشخاص =================
@@ -418,6 +555,7 @@
       '<button class="btn btn-soft" data-action="suggestForPerson" data-id="' + p.id + '">🎁 اقترح هدية</button></div>' +
       '<div class="section-title">مناسبات ' + esc(p.name) + '</div>' +
       (evs.length ? evs.map(x => eventCard(x.ev, x.days)).join('') : '<p class="muted">لا توجد مناسبات مسجلة.</p>') +
+      '<button class="btn btn-ghost btn-block" data-action="openHistory" data-id="' + p.id + '">📜 سجل الهدايا السابقة (' + giftHistory(p.id).length + ')</button>' +
       '<button class="btn btn-ghost btn-block" data-action="editPerson" data-id="' + p.id + '">✏️ تعديل البيانات</button>' +
       '</div>');
   }
@@ -498,8 +636,9 @@
     if (isOver) html += '<div class="alert-over"><span class="a-ico">⚠️</span><span>تنبيه: تجاوزتِ ميزانية هذه المناسبة بمقدار ' + money(s - b) + '</span></div>';
     else if (b > 0 && s > 0) html += '<div class="alert-ok">👍 أنتِ ضمن الميزانية، متبقي ' + money(b - s) + '</div>';
 
-    html += '<div class="section-title">الهدايا وتكاليفها <small>' + (ev.gifts || []).length + '</small></div>';
-    html += '<div class="gift-list">' + ((ev.gifts || []).length ? ev.gifts.map(g =>
+    const cg = currentGifts(ev);
+    html += '<div class="section-title">الهدايا وتكاليفها <small>' + cg.length + '</small></div>';
+    html += '<div class="gift-list">' + (cg.length ? cg.map(g =>
       '<div class="gift-row"><span>🎁</span><span class="g-name">' + esc(g.name) + '</span><span class="g-cost">' + money(g.cost) + '</span>' +
       '<button class="del-btn" data-action="deleteGift" data-ev="' + ev.id + '" data-id="' + g.id + '" aria-label="حذف">🗑️</button></div>').join('')
       : '<p class="muted small">لم تُسجّل أي هدية بعد.</p>') + '</div>';
@@ -515,10 +654,10 @@
     openSheet(html);
   }
 
-  function addGiftTo(ev, name, cost) {
+  function addGiftTo(ev, name, cost, catalogId) {
     const wasOver = num(ev.budget) > 0 && spent(ev) > num(ev.budget);
     ev.gifts = ev.gifts || [];
-    ev.gifts.push({ id: uid(), name, cost });
+    ev.gifts.push({ id: uid(), name, cost, date: isoDate(nextDate(ev)), catalogId: catalogId || '' });
     save();
     const nowOver = num(ev.budget) > 0 && spent(ev) > num(ev.budget);
     return nowOver && !wasOver ? 'newOver' : (nowOver ? 'over' : 'ok');
@@ -642,6 +781,7 @@
       confirmSheet('حذف ' + esc(p.name) + '؟', n ? 'سيتم حذف ' + n + ' مناسبة مرتبطة به أيضاً.' : 'لا يمكن التراجع عن الحذف.', 'نعم، احذف', () => {
         state.people = state.people.filter(x => x.id !== p.id);
         state.events = state.events.filter(e => e.personId !== p.id);
+        state.history = (state.history || []).filter(h => h.personId !== p.id);
         if (sug.personId === p.id) sug.personId = '';
         save(); render(); toast('تم الحذف');
       });
@@ -679,7 +819,7 @@
       }
       save();
       let status = 'ok';
-      if (pendingGift) { status = addGiftTo(d, pendingGift.name, pendingGift.cost); pendingGift = null; }
+      if (pendingGift) { status = addGiftTo(d, pendingGift.name, pendingGift.cost, pendingGift.catalogId); pendingGift = null; }
       render();
       const days = daysLeft(d);
       if (status !== 'ok') { overBudgetAlert(d, () => eventDetails(d)); return; }
@@ -740,8 +880,8 @@
       if (!sug.budget || budget <= 0) { toast('أدخلي الميزانية المتاحة', 'danger'); const b = $('#sugBudget'); if (b) b.focus(); return; }
       const p = person(sug.personId);
       const relation = p ? p.relation : sug.relation;
-      const r = scoreGifts(relation, sug.type, budget);
-      sug.results = Object.assign(r, { relation, type: sug.type, budget });
+      const r = scoreGifts(relation, sug.type, budget, p ? giftHistory(p.id) : []);
+      sug.results = Object.assign(r, { relation, type: sug.type, budget, personId: p ? p.id : '' });
       sug.page = 0;
       renderSuggest();
       const res = $('#sugResults'); if (res) res.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -749,11 +889,11 @@
     moreSuggest: () => { readSugForm(); sug.page++; $('#sugResults').innerHTML = resultsHtml(); $('#sugResults').scrollIntoView({ behavior: 'smooth', block: 'start' }); },
     adoptGift: d => {
       const g = window.GIFTS.find(x => x.id === d.id); if (!g) return;
-      const gift = { name: g.icon + ' ' + g.name, cost: g.price };
+      const gift = { name: g.icon + ' ' + g.name, cost: g.price, catalogId: g.id };
       const target = sug.eventId && eventById(sug.eventId);
-      if (target) { afterGiftAdded(target, addGiftTo(target, gift.name, gift.cost)); return; }
+      if (target) { afterGiftAdded(target, addGiftTo(target, gift.name, gift.cost, gift.catalogId)); return; }
       const candidates = state.events.filter(e => (!sug.personId || e.personId === sug.personId) && e.type === sug.type && daysLeft(e) >= 0);
-      if (candidates.length === 1) { afterGiftAdded(candidates[0], addGiftTo(candidates[0], gift.name, gift.cost)); return; }
+      if (candidates.length === 1) { afterGiftAdded(candidates[0], addGiftTo(candidates[0], gift.name, gift.cost, gift.catalogId)); return; }
       pendingGift = gift;
       if (candidates.length > 1) {
         openSheet(sheetHead('لأي مناسبة؟') + '<div class="sheet-body">' +
@@ -766,7 +906,7 @@
     adoptTo: d => {
       const ev = eventById(d.id); if (!ev || !pendingGift) return;
       const g = pendingGift; pendingGift = null;
-      afterGiftAdded(ev, addGiftTo(ev, g.name, g.cost));
+      afterGiftAdded(ev, addGiftTo(ev, g.name, g.cost, g.catalogId));
     },
     adoptNew: () => {
       const preset = { type: sug.type, budget: num(sug.budget) || '' };
@@ -775,6 +915,28 @@
       eventForm(null, preset);
       pendingGift = g;
       if (state.people.length) toast('أكملي بيانات المناسبة لحفظ الهدية');
+    },
+
+    // سجل الهدايا
+    openHistory: d => historySheet(d.id),
+    newHistory: () => historyForm(''),
+    newHistoryFor: d => historyForm(d.id),
+    pickHistType: (d, el) => {
+      historyDraft.type = d.id;
+      el.parentElement.querySelectorAll('.choice').forEach(c => c.setAttribute('aria-pressed', String(c === el)));
+    },
+    saveHistory: () => {
+      const h = saveHistoryFromForm(); if (!h) return;
+      render(); toast('تم حفظ الهدية في السجل ✅'); historySheet(h.personId);
+    },
+    saveHistoryAnother: () => {
+      const h = saveHistoryFromForm(); if (!h) return;
+      render(); toast('تم الحفظ — أضيفي الهدية التالية');
+      $('#hName').value = ''; $('#hCost').value = ''; $('#hName').focus();
+    },
+    deleteHistory: d => {
+      state.history = (state.history || []).filter(h => h.id !== d.id);
+      save(); render(); historySheet(d.person); toast('تم الحذف من السجل');
     },
 
     // الإعدادات
@@ -787,7 +949,7 @@
       });
     },
     exportData: () => {
-      const data = JSON.stringify({ app: 'gift-organizer', version: 1, exportedAt: new Date().toISOString(), people: state.people, events: state.events }, null, 2);
+      const data = JSON.stringify({ app: 'gift-organizer', version: 1, exportedAt: new Date().toISOString(), people: state.people, events: state.events, history: state.history || [] }, null, 2);
       if (downloadFile('نسخة-هداياي-' + isoDate(today()) + '.json', data, 'application/json')) toast('تم تصدير النسخة الاحتياطية ✅');
     },
     importData: () => {
@@ -799,7 +961,7 @@
           try {
             const d = JSON.parse(reader.result);
             if (!Array.isArray(d.people) || !Array.isArray(d.events)) throw new Error('bad');
-            state = { people: d.people, events: d.events, notified: state.notified };
+            state = { people: d.people, events: d.events, history: Array.isArray(d.history) ? d.history : [], notified: state.notified };
             save(); closeSheet(); render(); toast('تم استيراد البيانات ✅');
           } catch (e) { toast('الملف غير صالح', 'danger'); }
         };
@@ -809,7 +971,7 @@
     },
     clearAll: () => {
       confirmSheet('حذف جميع البيانات؟', 'سيتم حذف كل الأشخاص والمناسبات والهدايا من هذا الجهاز. ننصح بتصدير نسخة احتياطية أولاً.', 'نعم، احذف الكل', () => {
-        state = { people: [], events: [], notified: {} };
+        state = { people: [], events: [], history: [], notified: {} };
         Object.assign(sug, { personId: '', relation: '', eventId: '', results: null, page: 0 });
         save(); render(); toast('تم حذف جميع البيانات');
       });

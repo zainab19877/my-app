@@ -1,5 +1,5 @@
 // عامل الخدمة: يجعل التطبيق يعمل بدون إنترنت
-const CACHE = 'gift-organizer-v1';
+const CACHE = 'gift-organizer-v2';
 const ASSETS = ['./', './index.html', './styles.css', './app.js', './gifts.js', './manifest.json', './icon.svg', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', e => {
